@@ -1,0 +1,87 @@
+name: GitHub Organization Backup
+
+on:
+  schedule:
+    # Runs daily at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      parallel_jobs:
+        description: 'Number of parallel backup jobs'
+        required: false
+        default: '4'
+
+permissions:
+  contents: read
+
+env:
+  # ── GitHub ──
+  GITHUB_ORG: 'ta-labs-org'
+  # ── Azure Blob Storage ──
+  AZURE_STORAGE_ACCOUNT: 'stghubbackuptest'
+  AZURE_STORAGE_CONTAINER: 'github-backup'
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Azure CLI
+        run: |
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          # Option 1: Service Principal (recommended — set these secrets)
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          # Option 2: OIDC (uncomment below and remove 'creds' above)
+          # client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          # tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          # subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure blob container exists
+        run: |
+          az storage container create \
+            --account-name "${{ env.AZURE_STORAGE_ACCOUNT }}" \
+            --name "${{ env.AZURE_STORAGE_CONTAINER }}" \
+            --auth-mode login \
+            --only-show-errors || true
+
+      - name: Install git-lfs
+        run: |
+          sudo apt-get update && sudo apt-get install -y git-lfs
+          git lfs install
+
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GITHUB_APP_ID }}
+          private-key: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ env.GITHUB_ORG }}
+
+      - name: Run backup script
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          AZURE_STORAGE_ACCOUNT: ${{ env.AZURE_STORAGE_ACCOUNT }}
+          AZURE_STORAGE_CONTAINER: ${{ env.AZURE_STORAGE_CONTAINER }}
+          AZURE_STORAGE_SAS_TOKEN: ${{ secrets.AZURE_STORAGE_SAS_TOKEN }}
+          GITHUB_ORG: ${{ env.GITHUB_ORG }}
+          PARALLEL_JOBS: ${{ github.event.inputs.parallel_jobs || '4' }}
+        run: |
+          chmod +x scripts/backup.sh
+          bash scripts/backup.sh
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Backup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Organization**: ${{ env.GITHUB_ORG }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Storage**: ${{ env.AZURE_STORAGE_ACCOUNT }}/${{ env.AZURE_STORAGE_CONTAINER }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
