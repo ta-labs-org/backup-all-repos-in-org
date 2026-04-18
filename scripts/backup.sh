@@ -238,7 +238,7 @@ upload_to_blob() {
     --name "${blob_path}" \
     --file "${src}" \
     --overwrite true \
-    --auth-mode key \
+    --auth-mode login \
     "${auth_args[@]}" \
     --only-show-errors
 }

@@ -39,7 +39,8 @@ az storage account create \
 # Container 作成
 az storage container create \
   --account-name <YOUR_STORAGE_ACCOUNT> \
-  --name <YOUR_CONTAINER_NAME>
+  --name <YOUR_CONTAINER_NAME> \
+  --auth-mode login
 ```
 
 ### 2. GitHub App の作成
@@ -104,15 +105,17 @@ GitHub Organization に GitHub App を作成してインストールします。
 
 #### Azure Service Principal の作成
 
+バックアップスクリプトは `--auth-mode login` (Azure AD 認証) で Blob にアップロードします。
+Service Principal には **Storage Blob Data Contributor** ロールを付与してください。
+
 ```bash
 az ad sp create-for-rbac \
   --name "github-backup-sp" \
   --role "Storage Blob Data Contributor" \
-  --scopes /subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>/providers/Microsoft.Storage/storageAccounts/<STORAGE_ACCOUNT> \
-  --sdk-auth
+  --scopes /subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>/providers/Microsoft.Storage/storageAccounts/<STORAGE_ACCOUNT>
 ```
 
-出力された JSON を `AZURE_CREDENTIALS` Secret に設定します。
+> **Note**: `--sdk-auth` は非推奨です。出力された JSON の `clientId`, `clientSecret`, `tenantId`, `subscriptionId` を使って `AZURE_CREDENTIALS` Secret を構成してください。
 
 ### 4. ワークフロー設定の更新
 
@@ -129,7 +132,13 @@ env:
 
 ### 自動実行
 
-毎日 UTC 02:00 に自動実行されます (cron: `0 2 * * *`)。
+デフォルトではスケジュール実行は無効化されています。有効にするには `.github/workflows/backup.yml` の `schedule` セクションのコメントを外してください:
+
+```yaml
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 毎日 UTC 02:00
+```
 
 ### 手動実行
 
